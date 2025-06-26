@@ -44,7 +44,7 @@ A Python-based system that hosts a LLaMA-like language model with vector memory,
 
 1. Clone and setup:
 ```bash
-git clone <repository>
+git clone https://github.com/Dwarak18/SELM.git
 cd SELM
 pip install -r requirements.txt
 ```

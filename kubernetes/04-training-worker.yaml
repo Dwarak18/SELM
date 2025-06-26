@@ -1,0 +1,89 @@
+# SELM Training Worker Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: selm-trainer
+  namespace: selm-system
+  labels:
+    app: selm-trainer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: selm-trainer
+  template:
+    metadata:
+      labels:
+        app: selm-trainer
+    spec:
+      containers:
+      - name: selm-trainer
+        image: selm:latest  # Same image as API
+        imagePullPolicy: Always
+        command: ["python", "-m", "src.training.worker"]
+        env:
+        - name: SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: selm-secrets
+              key: SECRET_KEY
+        envFrom:
+        - configMapRef:
+            name: selm-config
+        volumeMounts:
+        - name: models-storage
+          mountPath: /app/models
+        - name: chroma-storage
+          mountPath: /app/data/chroma
+        resources:
+          requests:
+            memory: "4Gi"
+            cpu: "1000m"
+          limits:
+            memory: "8Gi"
+            cpu: "4000m"
+        # For GPU support, uncomment the following:
+        # resources:
+        #   limits:
+        #     nvidia.com/gpu: 1
+      volumes:
+      - name: models-storage
+        persistentVolumeClaim:
+          claimName: selm-models-pvc
+      - name: chroma-storage
+        persistentVolumeClaim:
+          claimName: selm-chroma-pvc
+      # For GPU support, uncomment the following:
+      # nodeSelector:
+      #   gpu: "true"
+      # tolerations:
+      # - key: nvidia.com/gpu
+      #   operator: Exists
+      #   effect: NoSchedule
+---
+# HorizontalPodAutoscaler for API
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: selm-api-hpa
+  namespace: selm-system
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: selm-api
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80

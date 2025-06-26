@@ -1,0 +1,114 @@
+# SELM API Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: selm-api
+  namespace: selm-system
+  labels:
+    app: selm-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: selm-api
+  template:
+    metadata:
+      labels:
+        app: selm-api
+    spec:
+      initContainers:
+      - name: wait-for-redis
+        image: busybox:1.28
+        command: ['sh', '-c', 'until nc -z selm-redis 6379; do echo waiting for redis; sleep 2; done;']
+      containers:
+      - name: selm-api
+        image: selm:latest  # Build and push your image to a registry
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8000
+        env:
+        - name: SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: selm-secrets
+              key: SECRET_KEY
+        envFrom:
+        - configMapRef:
+            name: selm-config
+        volumeMounts:
+        - name: models-storage
+          mountPath: /app/models
+        - name: chroma-storage
+          mountPath: /app/data/chroma
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "500m"
+          limits:
+            memory: "4Gi"
+            cpu: "2000m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+      volumes:
+      - name: models-storage
+        persistentVolumeClaim:
+          claimName: selm-models-pvc
+      - name: chroma-storage
+        persistentVolumeClaim:
+          claimName: selm-chroma-pvc
+---
+# SELM API Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: selm-api-service
+  namespace: selm-system
+  labels:
+    app: selm-api
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8000
+    targetPort: 8000
+    protocol: TCP
+  selector:
+    app: selm-api
+---
+# SELM API Ingress
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: selm-api-ingress
+  namespace: selm-system
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"  # If using cert-manager
+spec:
+  tls:
+  - hosts:
+    - selm.yourdomain.com  # Replace with your domain
+    secretName: selm-tls
+  rules:
+  - host: selm.yourdomain.com  # Replace with your domain
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: selm-api-service
+            port:
+              number: 8000

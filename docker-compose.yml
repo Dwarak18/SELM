@@ -1,0 +1,105 @@
+version: '3.8'
+
+services:
+  # Redis service for feedback queue
+  redis:
+    image: redis:7-alpine
+    container_name: selm-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # Main SELM application
+  selm-api:
+    build: .
+    container_name: selm-api
+    ports:
+      - "8000:8000"
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - CHROMA_DB_PATH=/app/data/chroma
+      - MODEL_CACHE_DIR=/app/models
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - GPU_ENABLED=false  # Set to true if GPU is available
+    volumes:
+      - model_cache:/app/models
+      - chroma_data:/app/data/chroma
+      - app_logs:/app/logs
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # Training worker (optional separate service)
+  selm-trainer:
+    build: .
+    container_name: selm-trainer
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - CHROMA_DB_PATH=/app/data/chroma
+      - MODEL_CACHE_DIR=/app/models
+      - GPU_ENABLED=false
+    volumes:
+      - model_cache:/app/models
+      - chroma_data:/app/data/chroma
+      - app_logs:/app/logs
+    depends_on:
+      - redis
+      - selm-api
+    command: python -m src.training.worker
+    deploy:
+      replicas: 1
+
+  # Prometheus for monitoring (optional)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: selm-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./docker/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+
+  # Grafana for visualization (optional)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: selm-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./docker/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./docker/grafana/datasources:/etc/grafana/provisioning/datasources
+
+volumes:
+  redis_data:
+  model_cache:
+  chroma_data:
+  app_logs:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  default:
+    name: selm-network

@@ -1,0 +1,122 @@
+# Prometheus Deployment for Monitoring
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: selm-prometheus
+  namespace: selm-system
+  labels:
+    app: selm-prometheus
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: selm-prometheus
+  template:
+    metadata:
+      labels:
+        app: selm-prometheus
+    spec:
+      containers:
+      - name: prometheus
+        image: prom/prometheus:latest
+        ports:
+        - containerPort: 9090
+        args:
+        - '--config.file=/etc/prometheus/prometheus.yml'
+        - '--storage.tsdb.path=/prometheus'
+        - '--web.console.libraries=/etc/prometheus/console_libraries'
+        - '--web.console.templates=/etc/prometheus/consoles'
+        - '--web.enable-lifecycle'
+        volumeMounts:
+        - name: prometheus-config
+          mountPath: /etc/prometheus
+        - name: prometheus-storage
+          mountPath: /prometheus
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "200m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+      volumes:
+      - name: prometheus-config
+        configMap:
+          name: prometheus-config
+      - name: prometheus-storage
+        emptyDir: {}
+---
+# Prometheus Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: selm-prometheus
+  namespace: selm-system
+  labels:
+    app: selm-prometheus
+spec:
+  type: ClusterIP
+  ports:
+  - port: 9090
+    targetPort: 9090
+    protocol: TCP
+  selector:
+    app: selm-prometheus
+---
+# Prometheus ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: selm-system
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+
+    scrape_configs:
+    - job_name: 'selm-api'
+      static_configs:
+      - targets: ['selm-api-service:8000']
+      metrics_path: /metrics
+      scrape_interval: 30s
+
+    - job_name: 'redis'
+      static_configs:
+      - targets: ['selm-redis:6379']
+      scrape_interval: 30s
+
+    - job_name: 'kubernetes-pods'
+      kubernetes_sd_configs:
+      - role: pod
+      relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+        action: keep
+        regex: true
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+        action: replace
+        target_label: __metrics_path__
+        regex: (.+)
+      - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+        action: replace
+        regex: ([^:]+)(?::\d+)?;(\d+)
+        replacement: $1:$2
+        target_label: __address__
+---
+# ServiceMonitor for Prometheus Operator (if using)
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: selm-api-monitor
+  namespace: selm-system
+  labels:
+    app: selm-api
+spec:
+  selector:
+    matchLabels:
+      app: selm-api
+  endpoints:
+  - port: http
+    path: /metrics
+    interval: 30s

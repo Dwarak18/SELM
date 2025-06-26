@@ -1,0 +1,74 @@
+# Namespace for SELM application
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: selm-system
+  labels:
+    name: selm-system
+---
+# ConfigMap for application configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: selm-config
+  namespace: selm-system
+data:
+  REDIS_URL: "redis://selm-redis:6379/0"
+  CHROMA_DB_PATH: "/app/data/chroma"
+  MODEL_CACHE_DIR: "/app/models"
+  API_HOST: "0.0.0.0"
+  API_PORT: "8000"
+  GPU_ENABLED: "false"
+  LOG_LEVEL: "INFO"
+---
+# Secret for sensitive configuration
+apiVersion: v1
+kind: Secret
+metadata:
+  name: selm-secrets
+  namespace: selm-system
+type: Opaque
+data:
+  SECRET_KEY: eW91ci1zZWNyZXQta2V5LWhlcmU=  # your-secret-key-here (base64 encoded)
+---
+# PersistentVolumeClaim for model storage
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: selm-models-pvc
+  namespace: selm-system
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+  storageClassName: standard  # Adjust based on your cluster
+---
+# PersistentVolumeClaim for vector database
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: selm-chroma-pvc
+  namespace: selm-system
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: standard
+---
+# PersistentVolumeClaim for Redis data
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: selm-redis-pvc
+  namespace: selm-system
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: standard
